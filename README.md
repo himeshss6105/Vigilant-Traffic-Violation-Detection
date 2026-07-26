@@ -161,7 +161,10 @@ npm run dev
 
 ## 📸 Screenshots
 
-> *Add dashboard screenshots or a demo GIF here to showcase the UI and detection in action.*
+> <img width="1267" height="900" alt="image" src="https://github.com/user-attachments/assets/73c8cbd1-f3ae-4654-a388-c2cef91c10cc" />
+> <img width="1108" height="761" alt="image" src="https://github.com/user-attachments/assets/3e6f0688-d6ad-4df0-8798-e8f5c48ec9af" />
+> <img width="1035" height="897" alt="image" src="https://github.com/user-attachments/assets/a36a0dd6-b3cd-4365-a7e8-f331b1e8465c" />
+> <img width="1030" height="887" alt="image" src="https://github.com/user-attachments/assets/773c7603-d96e-48ff-9500-c699c6f78d2b" />
 
 ---
 
