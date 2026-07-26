@@ -1,0 +1,6 @@
+{
+  "name": "Traffic Violation Detection System",
+  "description": "An interactive, multi-stage AI traffic monitoring dashboard demonstrating YOLO-based real-time detection for motorcycle violations (helmet usage, triple riding) and car violations (seat belt compliance) with an integrated presentation and live AI-powered image analyzer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
