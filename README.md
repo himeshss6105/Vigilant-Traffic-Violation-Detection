@@ -1,4 +1,5 @@
 <div align="center">
+<<<<<<< HEAD
 
 # 🚦 Vigilant Traffic
 
@@ -15,9 +16,15 @@
 </div>
 
 ---
+=======
+</div>
+
+# Run and deploy your app
+>>>>>>> 7bf6d2a (ReadMe changed)
 
 ## 📖 Table of Contents
 
+<<<<<<< HEAD
 - [About the Project](#-about-the-project)
 - [Key Features](#-key-features)
 - [Tech Stack](#-tech-stack)
@@ -29,6 +36,9 @@
 - [Contributing](#-contributing)
 - [License](#-license)
 - [Contact](#-contact)
+=======
+View your app in : "To be Done Soon"
+>>>>>>> 7bf6d2a (ReadMe changed)
 
 ---
 
