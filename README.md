@@ -6,7 +6,7 @@
 
 *Making roads safer, one frame at a time.*
 
-![YOLOv8](https://img.shields.io/badge/Model-YOLOv8-00FFFF?style=for-the-badge&logo=yolo)
+![YOLOv11](https://img.shields.io/badge/Model-YOLOv11-00FFFF?style=for-the-badge&logo=yolo)
 ![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react)
 ![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6?style=for-the-badge&logo=typescript)
 ![Gemini API](https://img.shields.io/badge/AI-Gemini_API-8E75B2?style=for-the-badge&logo=googlegemini)
@@ -34,7 +34,7 @@
 
 ## 🎯 About the Project
 
-**Vigilant Traffic** is a computer-vision-based traffic violation detection system built to identify common road safety violations in real time from video footage. It combines a **YOLOv8-powered detection pipeline** with a modern, responsive web interface — giving traffic authorities and researchers a fast, accurate way to flag violations without manual monitoring.
+**Vigilant Traffic** is a computer-vision-based traffic violation detection system built to identify common road safety violations in real time from video footage. It combines a computer-vision detection pipeline with a modern, responsive web interface — giving traffic authorities and researchers a fast, accurate way to flag violations without manual monitoring.
 
 This project was built as a final-year engineering initiative with a focus on practical deployability: clean detection logic on the backend, and an intuitive, data-rich dashboard on the frontend.
 
@@ -60,8 +60,8 @@ This project was built as a final-year engineering initiative with a focus on pr
 ## 🛠️ Tech Stack
 
 **Detection Engine**
-- YOLOv8 (object detection)
-- Gemini Vision API (violation reasoning & classification support)
+- Gemini Vision API (current production detection & reasoning engine)
+- **YOLOv11** — custom-trained object detection model (merged dataset of 5,619 images across 6 violation classes, 100 training epochs). Trained and validated; not yet integrated into the live pipeline.
 
 **Frontend**
 - React
@@ -70,16 +70,33 @@ This project was built as a final-year engineering initiative with a focus on pr
 
 **Other**
 - Python (data & model pipeline)
-- Node.js (API layer)
+- Node.js / Express (API layer)
 
 ---
 
 ## 🏗️ System Architecture
 
+**Current (production):**
+
 ```
 ┌─────────────────┐      ┌──────────────────┐      ┌────────────────────┐
-│   Video Input     │ ──▶  │  YOLOv8 Detection │ ──▶  │  Gemini Vision API   │
-│ (CCTV / Uploaded) │      │     Pipeline      │      │  Violation Analysis  │
+│   Video Input     │ ──▶  │  Gemini Vision API │ ──▶  │  Violation Analysis  │
+│ (CCTV / Uploaded) │      │   (current engine) │      │                      │
+└─────────────────┘      └──────────────────┘      └────────────────────┘
+                                                              │
+                                                              ▼
+                                                  ┌────────────────────────┐
+                                                  │  React + TypeScript UI  │
+                                                  │  Dashboard & Evidence   │
+                                                  └────────────────────────┘
+```
+
+**Planned (post YOLOv11 integration):**
+
+```
+┌─────────────────┐      ┌──────────────────┐      ┌────────────────────┐
+│   Video Input     │ ──▶  │ YOLOv11 Detection │ ──▶  │   FastAPI Inference  │
+│ (CCTV / Uploaded) │      │  (trained model)  │      │       Service        │
 └─────────────────┘      └──────────────────┘      └────────────────────┘
                                                               │
                                                               ▼
@@ -116,11 +133,9 @@ pip install -r requirements.txt
 
 ### Environment Setup
 
-Create a `.env` file in the backend directory:
-
-```env
-GEMINI_API_KEY=your_api_key_here
-```
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 
 ### Run the Project
 
@@ -151,6 +166,9 @@ npm run dev
 - [x] Seat belt detection
 - [x] Rearview mirror detection
 - [x] React + TypeScript dashboard
+- [x] Train custom **YOLOv11** model on merged dataset (Roboflow + PyTorch, 100 epochs, GTX 1650)
+- [ ] 🔌 Build FastAPI inference service to serve `best.pt`
+- [ ] 🔁 Integrate trained YOLOv11 model into the existing React/Express stack, replacing Gemini as the primary detector
 - [ ] 📹 **Live CCTV feed integration** — connect directly to live camera streams for real-time monitoring, instead of relying only on uploaded video files
 - [ ] 🔔 Real-time alert notifications for authorities
 - [ ] 🚗 Number plate recognition for automatic violation ticketing
