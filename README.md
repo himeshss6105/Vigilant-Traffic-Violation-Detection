@@ -1,5 +1,4 @@
 <div align="center">
-<<<<<<< HEAD
 
 # 🚦 Vigilant Traffic
 
@@ -7,46 +6,42 @@
 
 *Making roads safer, one frame at a time.*
 
-![YOLOv11](https://img.shields.io/badge/Model-YOLOv11-00FFFF?style=for-the-badge&logo=yolo)
-![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react)
-![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6?style=for-the-badge&logo=typescript)
-![Gemini API](https://img.shields.io/badge/AI-Gemini_API-8E75B2?style=for-the-badge&logo=googlegemini)
-![Status](https://img.shields.io/badge/Status-Active_Development-brightgreen?style=for-the-badge)
+<br/>
+
+![YOLOv11](https://img.shields.io/badge/Model-YOLOv11-00FFFF?style=for-the-badge)
+![FastAPI](https://img.shields.io/badge/Inference-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Gemini API](https://img.shields.io/badge/AI-Gemini_API-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Completed-brightgreen?style=for-the-badge)
 
 </div>
 
 ---
-=======
-</div>
-
-# Run and deploy your app
->>>>>>> 7bf6d2a (ReadMe changed)
 
 ## 📖 Table of Contents
 
-<<<<<<< HEAD
 - [About the Project](#-about-the-project)
 - [Key Features](#-key-features)
 - [Tech Stack](#-tech-stack)
 - [System Architecture](#-system-architecture)
 - [Getting Started](#-getting-started)
 - [Usage](#-usage)
+- [Project Structure](#-project-structure)
 - [Roadmap](#-roadmap)
 - [Screenshots](#-screenshots)
 - [Contributing](#-contributing)
 - [License](#-license)
 - [Contact](#-contact)
-=======
-View your app
->>>>>>> 7bf6d2a (ReadMe changed)
 
 ---
 
 ## 🎯 About the Project
 
-**Vigilant Traffic** is a computer-vision-based traffic violation detection system built to identify common road safety violations in real time from video footage. It combines a computer-vision detection pipeline with a modern, responsive web interface — giving traffic authorities and researchers a fast, accurate way to flag violations without manual monitoring.
+**Vigilant Traffic** is a computer-vision-based traffic violation detection system that identifies common road-safety violations from video footage. It pairs a custom-trained **YOLOv11** detection service with **Gemini Vision** reasoning and a modern, data-rich web dashboard, giving traffic authorities and researchers a fast, accurate way to flag violations without manual monitoring.
 
-This project was built as a final-year engineering initiative with a focus on practical deployability: clean detection logic on the backend, and an intuitive, data-rich dashboard on the frontend.
+Built as a final-year engineering project with a focus on practical deployability: a dedicated inference service, a fusion layer that combines detector outputs, and an intuitive dashboard for reviewing evidence.
 
 ---
 
@@ -60,7 +55,9 @@ This project was built as a final-year engineering initiative with a focus on pr
 | 🪞 **Rearview Mirror Check** | Flags vehicles missing rearview mirrors |
 
 **Plus:**
-- ⚡ Real-time inference on video feeds
+
+- ⚡ Real-time inference on video input
+- 🧠 Hybrid detection: custom YOLOv11 models + Gemini Vision, merged by a fusion layer
 - 📊 Interactive dashboard with violation analytics
 - 🖼️ Auto-captured evidence frames for each flagged violation
 - 🌐 Clean, responsive UI built with React + TypeScript
@@ -69,117 +66,153 @@ This project was built as a final-year engineering initiative with a focus on pr
 
 ## 🛠️ Tech Stack
 
-**Detection Engine**
-- Gemini Vision API (current production detection & reasoning engine)
-- **YOLOv11** — custom-trained object detection model (merged dataset of 5,619 images across 6 violation classes, 100 training epochs). Trained and validated; not yet integrated into the live pipeline.
+| Layer | Technologies |
+|---|---|
+| **Detection** | YOLOv11 (custom-trained), Gemini Vision API |
+| **Inference Service** | Python, FastAPI, Uvicorn |
+| **API / Server** | Node.js, Express, TypeScript |
+| **Frontend** | React, TypeScript, Tailwind CSS |
 
-**Frontend**
-- React
-- TypeScript
-- Tailwind CSS
+**About the YOLOv11 models:** trained on a merged dataset of **5,619 images** across **6 violation classes** for **100 epochs** (Roboflow + PyTorch, GTX 1650). Two weights are included:
 
-**Other**
-- Python (data & model pipeline)
-- Node.js / Express (API layer)
+- `traffic_best.pt`: helmet, triple riding and seat belt detection
+- `mirror_best.pt`: rearview mirror detection
 
 ---
 
 ## 🏗️ System Architecture
 
-**Current (production):**
-
-```
-┌─────────────────┐      ┌──────────────────┐      ┌────────────────────┐
-│   Video Input     │ ──▶  │  Gemini Vision API │ ──▶  │  Violation Analysis  │
-│ (CCTV / Uploaded) │      │   (current engine) │      │                      │
-└─────────────────┘      └──────────────────┘      └────────────────────┘
-                                                              │
-                                                              ▼
-                                                  ┌────────────────────────┐
-                                                  │  React + TypeScript UI  │
-                                                  │  Dashboard & Evidence   │
-                                                  └────────────────────────┘
+```mermaid
+flowchart LR
+    A[📹 Video Input<br/>CCTV / Uploaded] --> B[🖥️ Node.js + Express Server]
+    B --> C[🎯 YOLOv11 Service<br/>FastAPI · port 8001]
+    B --> D[✨ Gemini Vision API]
+    C --> E[🔀 Fusion Layer<br/>server-lib/fusion.ts]
+    D --> E
+    E --> F[📊 React Dashboard<br/>Violations & Evidence]
 ```
 
-**Planned (post YOLOv11 integration):**
-
-```
-┌─────────────────┐      ┌──────────────────┐      ┌────────────────────┐
-│   Video Input     │ ──▶  │ YOLOv11 Detection │ ──▶  │   FastAPI Inference  │
-│ (CCTV / Uploaded) │      │  (trained model)  │      │       Service        │
-└─────────────────┘      └──────────────────┘      └────────────────────┘
-                                                              │
-                                                              ▼
-                                                  ┌────────────────────────┐
-                                                  │  React + TypeScript UI  │
-                                                  │  Dashboard & Evidence   │
-                                                  └────────────────────────┘
-```
+1. The video is sent to the Express server.
+2. The server queries the **YOLOv11 FastAPI service** and **Gemini Vision**.
+3. The **fusion layer** merges both results into final violation decisions.
+4. The **dashboard** displays flagged violations with snapshots, type and timestamp.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Node.js (v18+)
-- Python 3.9+
-- A Gemini API key
 
-### Installation
+- [Node.js](https://nodejs.org/) v18+
+- [Python](https://www.python.org/) 3.9+
+- A [Gemini API key](https://aistudio.google.com/app/apikey)
+
+### 1. Clone the repository
 
 ```bash
-# Clone the repository
-git clone https://github.com/<your-username>/vigilant-traffic.git
-cd vigilant-traffic
+git clone https://github.com/himeshss6105/Vigilant-Traffic-Violation-Detection.git
+cd Vigilant-Traffic-Violation-Detection
+```
 
-# Install frontend dependencies
-cd frontend
+### 2. Install dependencies
+
+```bash
+# Web app / server
 npm install
 
-# Install backend dependencies
-cd ../backend
+# YOLOv11 inference service
+cd yolo-service
+python -m venv venv
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # macOS / Linux
 pip install -r requirements.txt
+cd ..
 ```
 
-### Environment Setup
+### 3. Configure environment variables
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+Create a `.env.local` file in the project root (use `.env.example` as a template):
 
-### Run the Project
-
-```bash
-# Start backend
-python app.py
-
-# Start frontend
-cd frontend
-npm run dev
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
+
+> ⚠️ Never commit your real API key. `.env.local` should stay in `.gitignore`.
 
 ---
 
-## 💻 Usage
+## ▶️ Usage
 
-1. Upload a traffic video clip (or connect a live feed — see [Roadmap](#-roadmap))
-2. The detection pipeline processes each frame for violations
-3. Flagged violations appear on the dashboard with a snapshot, violation type, and timestamp
-4. Export or review flagged evidence directly from the UI
+> **Important:** start the **YOLOv11 service first**. The app depends on it for detection.
+
+### Step 1: Start the YOLOv11 service
+
+```bash
+cd yolo-service
+python -m uvicorn main:app --port 8001
+```
+
+Keep this terminal running. The service is ready when Uvicorn reports it is running on `http://127.0.0.1:8001`.
+
+### Step 2: Start the app
+
+Open a **new terminal** in the project root:
+
+```bash
+npm run dev
+```
+
+Then open the local URL printed in the terminal.
+
+### Using the dashboard
+
+1. Upload a traffic video clip (or connect a live feed, see the [Roadmap](#-roadmap))
+2. The pipeline analyzes each frame for violations
+3. Flagged violations appear on the dashboard with a snapshot, violation type and timestamp
+4. Review the evidence directly from the UI
+
+---
+
+## 📂 Project Structure
+
+```
+Vigilant-Traffic-Violation-Detection/
+├── src/                      # React + TypeScript frontend
+│   ├── components/
+│   │   ├── Dashboard.tsx     # Violations dashboard
+│   │   └── Presentation.tsx  # Project presentation view
+│   ├── App.tsx
+│   └── data.ts
+├── server-lib/
+│   └── fusion.ts             # Fuses YOLOv11 + Gemini results
+├── yolo-service/             # YOLOv11 FastAPI inference service
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── traffic_best.pt       # Helmet / triple riding / seat belt model
+│   └── mirror_best.pt        # Rearview mirror model
+├── server.ts                 # Express API server
+├── .env.example
+└── package.json
+```
 
 ---
 
 ## 🗺️ Roadmap
+
+**Completed**
 
 - [x] Helmet detection
 - [x] Triple riding detection
 - [x] Seat belt detection
 - [x] Rearview mirror detection
 - [x] React + TypeScript dashboard
-- [x] Train custom **YOLOv11** model on merged dataset (Roboflow + PyTorch, 100 epochs, GTX 1650)
-- [ ] 🔌 Build FastAPI inference service to serve `best.pt`
-- [ ] 🔁 Integrate trained YOLOv11 model into the existing React/Express stack, replacing Gemini as the primary detector
-- [ ] 📹 **Live CCTV feed integration** — connect directly to live camera streams for real-time monitoring, instead of relying only on uploaded video files
+- [x] Custom **YOLOv11** training on a merged dataset (5,619 images, 100 epochs)
+- [x] FastAPI inference service to serve the trained weights
+- [x] YOLOv11 + Gemini fusion layer integrated into the Express stack
+
+**Planned**
+
+- [ ] 📹 Live CCTV feed integration for real-time monitoring
 - [ ] 🔔 Real-time alert notifications for authorities
 - [ ] 🚗 Number plate recognition for automatic violation ticketing
 - [ ] ☁️ Cloud deployment for multi-camera, city-wide monitoring
@@ -189,23 +222,33 @@ npm run dev
 
 ## 📸 Screenshots
 
-> <img width="1267" height="900" alt="image" src="https://github.com/user-attachments/assets/73c8cbd1-f3ae-4654-a388-c2cef91c10cc" />
+<div align="center">
 
-> <img width="1108" height="761" alt="image" src="https://github.com/user-attachments/assets/3e6f0688-d6ad-4df0-8798-e8f5c48ec9af" />
+<img width="1267" height="900" alt="Dashboard overview" src="https://github.com/user-attachments/assets/73c8cbd1-f3ae-4654-a388-c2cef91c10cc" />
 
-> <img width="1035" height="897" alt="image" src="https://github.com/user-attachments/assets/a36a0dd6-b3cd-4365-a7e8-f331b1e8465c" />
+<br/><br/>
 
-> <img width="1030" height="887" alt="image" src="https://github.com/user-attachments/assets/773c7603-d96e-48ff-9500-c699c6f78d2b" />
+<img width="1108" height="761" alt="Violation detection" src="https://github.com/user-attachments/assets/3e6f0688-d6ad-4df0-8798-e8f5c48ec9af" />
+
+<br/><br/>
+
+<img width="1035" height="897" alt="Evidence view" src="https://github.com/user-attachments/assets/a36a0dd6-b3cd-4365-a7e8-f331b1e8465c" />
+
+<br/><br/>
+
+<img width="1030" height="887" alt="Analytics" src="https://github.com/user-attachments/assets/773c7603-d96e-48ff-9500-c699c6f78d2b" />
+
+</div>
 
 ---
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome!
+Contributions, issues and feature requests are welcome!
 
 1. Fork the project
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+3. Commit your changes (`git commit -m "Add some amazing feature"`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
@@ -213,7 +256,7 @@ Contributions, issues, and feature requests are welcome!
 
 ## 📄 License
 
-This project is licensed under the MIT License — see the `LICENSE` file for details.
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ---
 
