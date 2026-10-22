@@ -37,7 +37,7 @@
 - [License](#-license)
 - [Contact](#-contact)
 =======
-View your app in : "To be Done Soon"
+View your app
 >>>>>>> 7bf6d2a (ReadMe changed)
 
 ---
