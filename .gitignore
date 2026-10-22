@@ -7,3 +7,15 @@ data/
 .DS_Store
 .vscode/
 *.log
+__pycache__/
+*.pyc
+*.backup
+.env
+node_modules/
+
+__pycache__/
+*.pyc
+*.backup
+.env
+.env.local
+node_modules/

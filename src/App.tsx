@@ -56,7 +56,7 @@ export default function App() {
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h1 className="text-base font-bold font-display tracking-tight text-white">YOLOv8 Enforcement</h1>
+                <h1 className="text-base font-bold font-display tracking-tight text-white">YOLOv11 Enforcement</h1>
                 <span className="bg-indigo-950 text-indigo-400 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded border border-indigo-800/30 uppercase tracking-wider">
                   Two-Stage
                 </span>
@@ -131,7 +131,7 @@ export default function App() {
 
           <div className="flex flex-col gap-2 shrink-0">
             <div className="bg-slate-900/80 px-3.5 py-2 rounded-xl border border-slate-800 text-[11px] font-mono">
-              <span className="text-slate-500">ENGINE:</span> <span className="text-indigo-400 font-bold">YOLOv8m + CLAHE</span>
+              <span className="text-slate-500">ENGINE:</span> <span className="text-indigo-400 font-bold">YOLOv11 + CLAHE</span>
             </div>
             <div className="bg-slate-900/80 px-3.5 py-2 rounded-xl border border-slate-800 text-[11px] font-mono">
               <span className="text-slate-500">ACCURACY:</span> <span className="text-emerald-400 font-bold">92.4% mAP@0.5</span>
@@ -234,7 +234,7 @@ export default function App() {
             <span>•</span>
             <span className="hover:text-slate-300 transition-all cursor-pointer">E-Challan Webhooks</span>
             <span>•</span>
-            <span className="hover:text-slate-300 transition-all cursor-pointer">YOLOv8 Weights</span>
+            <span className="hover:text-slate-300 transition-all cursor-pointer">YOLOv11 Weights</span>
           </div>
         </div>
       </footer>

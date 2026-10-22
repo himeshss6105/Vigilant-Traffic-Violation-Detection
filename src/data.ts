@@ -64,7 +64,7 @@ export const SLIDES: Slide[] = [
     subtitle: "Data Flow from Camera Ingress to Alert Generation",
     points: [
       "Video Ingress: CCTV camera stream, Dashcam feed, or static image upload is normalized and fed at 1080p.",
-      "Global Detector (Stage 1): Custom YOLOv8 detector segments Motorcycles (COCO Class 3) and Cars (COCO Class 2).",
+      "Global Detector (Stage 1): Custom YOLOv11 detector segments Motorcycles (COCO Class 3) and Cars (COCO Class 2).",
       "Branch-Two-Wheeler (Stage 2A): Crop + 15% pad -> Rider/Helmet detector identifies 'person', 'helmet', 'no-helmet'. Person Count > 2 triggers 'Triple Riding'.",
       "Branch-Four-Wheeler (Stage 2B): Crop -> Windshield Isolation -> Seat Belt detector identifies diagonal shoulder straps on front-row occupants.",
       "Centralized Decision Engine: Joins confidence scores, logs violations, formats an E-Challan ticket payload, and pushes real-time WebSocket dashboard alerts."
@@ -80,7 +80,7 @@ export const SLIDES: Slide[] = [
       "Motorcycle Detection: Achieves 92.4% mAP@0.5 on custom-annotated public traffic datasets, running robustly in rain and heavy congestion.",
       "Helmet Compliance Accuracy: Specialized Stage-2 helmet model achieves 88.2% precision; crop padding significantly reduced head-boundary truncation errors.",
       "Seat Belt Compliance Precision: Achieves 84.6% accuracy under direct daylight. Night-vision IR performance maintains 76.5% detection consistency.",
-      "Throughput Benchmarking: YOLOv8m runs at 48 FPS on NVIDIA RTX 3060. Optimized INT8 engine achieves 28 FPS on a Raspberry Pi / Jetson Nano edge processor.",
+      "Throughput Benchmarking: YOLOv11 runs at 48 FPS on NVIDIA RTX 3060. Optimized INT8 engine achieves 28 FPS on a Raspberry Pi / Jetson Nano edge processor.",
       "Violation Over-Counting: Temporal tracking filters reduced false double-triggers of moving vehicles from 14% to less than 1.2%."
     ],
     visualType: "bar-chart"

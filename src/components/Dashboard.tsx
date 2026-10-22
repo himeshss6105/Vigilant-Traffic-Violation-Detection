@@ -15,7 +15,8 @@ import {
   Loader2,
   ScanLine,
   Receipt,
-  CheckCircle
+  CheckCircle,
+  Video
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -37,11 +38,55 @@ type SimVehicle = {
   seatbelt?: boolean;
 };
 
+// Draws real detection boxes (0-1000 normalised) onto the canvas, used by the live camera view.
+function drawAnalysisBoxes(
+  ctx: CanvasRenderingContext2D,
+  analysis: DetectionResult,
+  ox: number,
+  oy: number,
+  dw: number,
+  dh: number,
+  alpha: number
+) {
+  const draw = (box: BoundingBox, label: string, isViolation: boolean) => {
+    const [ymin, xmin, ymax, xmax] = box;
+    const x = ox + (xmin / 1000) * dw;
+    const y = oy + (ymin / 1000) * dh;
+    const w = ((xmax - xmin) / 1000) * dw;
+    const h = ((ymax - ymin) / 1000) * dh;
+    const color = isViolation ? "#ef4444" : "#10b981";
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+    ctx.font = "bold 9px monospace";
+    const labelWidth = ctx.measureText(label).width + 8;
+    ctx.fillStyle = color;
+    ctx.fillRect(x - 1, y - 16, Math.max(labelWidth, 10), 16);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(label, x + 3, y - 5);
+    ctx.globalAlpha = 1;
+  };
+
+  analysis.motorcycles?.forEach((bike) => {
+    const v = deriveBikeViolations(
+      bike.riders?.length ?? 0,
+      bike.riders?.filter((r) => !r.hasHelmet).length ?? 0,
+      bike.hasRearviewMirror
+    );
+    draw(bike.box, `BIKE${bike.plateText ? " • " + bike.plateText : ""}`, v.length > 0);
+  });
+  analysis.cars?.forEach((car) => {
+    const v = deriveCarViolations(car.occupants?.filter((o) => !o.wearingSeatbelt).length ?? 0);
+    draw(car.box, `CAR${car.plateText ? " • " + car.plateText : ""}`, v.length > 0);
+  });
+}
+
 export default function Dashboard() {
   // 'live' = the original simulated/preloaded CCTV animation (primary/default view).
   // 'upload' = a real photo attached by the user, run through the actual
   // Gemini + OCR analysis pipeline (same endpoint the AI Playroom tab uses).
-  const [mode, setMode] = useState<"live" | "upload">("live");
+  const [mode, setMode] = useState<"live" | "upload" | "camera">("live");
 
   const [isPlaying, setIsPlaying] = useState(true);
   const [simulationSpeed, setSimulationSpeed] = useState(1); // 1x or 2x
@@ -65,6 +110,26 @@ export default function Dashboard() {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [issuedChallans, setIssuedChallans] = useState<Record<string, string>>({});
   const [issuingId, setIssuingId] = useState<string | null>(null);
+
+  // --- Live camera mode state ---
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [scanning, setScanning] = useState(true); // false = frozen for review
+  const [scanIntervalSec, setScanIntervalSec] = useState(4);
+  const [lastAnalyzedAt, setLastAnalyzedAt] = useState<number | null>(null);
+  const [framesAnalyzed, setFramesAnalyzed] = useState(0);
+  // Mutable mirror of state for the animation / scan loops (avoids re-creating them every render).
+  const cam = useRef<{
+    analysis: DetectionResult | null;
+    scanning: boolean;
+    interval: number;
+    lastAt: number | null;
+    busy: boolean;
+    frameImg: HTMLImageElement | null;
+    scanNow: boolean;
+  }>({ analysis: null, scanning: true, interval: 4, lastAt: null, busy: false, frameImg: null, scanNow: false });
 
   // Simulated traffic assets that move across the screen
   const [vehicles, setVehicles] = useState<SimVehicle[]>([
@@ -393,6 +458,221 @@ export default function Dashboard() {
     };
   }, [mode, uploadedImageSrc, realAnalysis]);
 
+  // ---------- Live camera mode ----------
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+  };
+
+  // Release the camera if the dashboard is closed.
+  useEffect(() => () => stopCamera(), []);
+
+  // Keep the loop-facing ref in sync with React state.
+  useEffect(() => {
+    cam.current.analysis = realAnalysis;
+    cam.current.scanning = scanning;
+    cam.current.interval = scanIntervalSec;
+    cam.current.lastAt = lastAnalyzedAt;
+    cam.current.busy = isAnalyzing;
+  });
+
+  const startCamera = async () => {
+    setCameraError(null);
+    setCameraStarting(true);
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("This browser cannot access a camera here (it needs https:// or localhost).");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" },
+        audio: false,
+      });
+      stopCamera();
+      streamRef.current = stream;
+      stream.getVideoTracks()[0].onended = () => {
+        stopCamera();
+        setCameraError("The camera was disconnected.");
+        setMode("live");
+      };
+      setRealAnalysis(null);
+      setUploadedImageSrc(null);
+      setIssuedChallans({});
+      setAnalyzeError(null);
+      setFramesAnalyzed(0);
+      setLastAnalyzedAt(null);
+      setScanning(true);
+      setMode("camera");
+    } catch (err: any) {
+      const name = err?.name as string | undefined;
+      setCameraError(
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "Camera permission was blocked. Click the camera icon in the address bar, allow access, then press Live Feed again."
+          : name === "NotFoundError" || name === "OverconstrainedError"
+          ? "No camera was found on this device."
+          : name === "NotReadableError"
+          ? "The camera is being used by another app. Close it and try again."
+          : err?.message || "Could not start the camera."
+      );
+    } finally {
+      setCameraStarting(false);
+    }
+  };
+
+  // Show the stream in the (off-screen) video element once camera mode is active.
+  useEffect(() => {
+    if (mode !== "camera") return;
+    const v = videoRef.current;
+    const s = streamRef.current;
+    if (!v || !s) return;
+    v.srcObject = s;
+    v.play().catch(() => {});
+  }, [mode]);
+
+  // Cache the last analysed frame so "freeze" can show exactly what the boxes belong to.
+  useEffect(() => {
+    if (mode !== "camera" || !uploadedImageSrc) {
+      cam.current.frameImg = null;
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      cam.current.frameImg = img;
+    };
+    img.src = uploadedImageSrc;
+  }, [uploadedImageSrc, mode]);
+
+  // Smooth live video + the most recent detection boxes.
+  useEffect(() => {
+    if (mode !== "camera") return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    let raf = 0;
+
+    const render = () => {
+      const c = cam.current;
+      const video = videoRef.current;
+      const frozen = !c.scanning && !!c.frameImg;
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      let sw = 0;
+      let sh = 0;
+      let src: CanvasImageSource | null = null;
+      if (frozen && c.frameImg) {
+        src = c.frameImg;
+        sw = c.frameImg.naturalWidth;
+        sh = c.frameImg.naturalHeight;
+      } else if (video && video.readyState >= 2 && video.videoWidth) {
+        src = video;
+        sw = video.videoWidth;
+        sh = video.videoHeight;
+      }
+
+      if (src && sw && sh) {
+        const scale = Math.min(canvas.width / sw, canvas.height / sh);
+        const dw = sw * scale;
+        const dh = sh * scale;
+        const ox = (canvas.width - dw) / 2;
+        const oy = (canvas.height - dh) / 2;
+        ctx.drawImage(src, ox, oy, dw, dh);
+        if (c.analysis) {
+          const age = c.lastAt ? (Date.now() - c.lastAt) / 1000 : 0;
+          // Boxes belong to the moment of the last scan; fade them as they get older.
+          drawAnalysisBoxes(ctx, c.analysis, ox, oy, dw, dh, frozen ? 1 : Math.max(0.4, 1 - age / 20));
+        }
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = "12px monospace";
+        ctx.fillText("Starting camera...", 25, canvas.height / 2);
+      }
+
+      ctx.font = "10px monospace";
+      ctx.fillStyle = "#ef4444";
+      ctx.fillText(frozen ? "■ FROZEN" : "● LIVE", 25, 25);
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      const ageText = c.lastAt ? `last scan ${Math.round((Date.now() - c.lastAt) / 1000)}s ago` : "no scan yet";
+      const state = !c.scanning ? "paused" : c.busy ? "scanning..." : `every ${c.interval}s`;
+      ctx.fillText(`CAMERA FEED • AI SCAN ${state} • ${ageText}`, 25, canvas.height - 15);
+
+      raf = requestAnimationFrame(render);
+    };
+    raf = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(raf);
+  }, [mode]);
+
+  // Sends one frame at a time to /api/analyze (Gemini + YOLO + OCR). The next scan only starts
+  // after the previous one finishes, so slow responses never pile up.
+  useEffect(() => {
+    if (mode !== "camera") return;
+    let stopped = false;
+    let timer: number | undefined;
+    let controller: AbortController | null = null;
+
+    const captureFrame = (): string | null => {
+      const v = videoRef.current;
+      if (!v || v.readyState < 2 || !v.videoWidth) return null;
+      // Max 1280 px wide JPEG: small enough to upload quickly, large enough for plate OCR.
+      const scale = Math.min(1, 1280 / v.videoWidth);
+      const c = document.createElement("canvas");
+      c.width = Math.round(v.videoWidth * scale);
+      c.height = Math.round(v.videoHeight * scale);
+      c.getContext("2d")?.drawImage(v, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", 0.8);
+    };
+
+    const tick = async () => {
+      if (stopped) return;
+      const state = cam.current;
+      if (!state.scanning && !state.scanNow) {
+        timer = window.setTimeout(tick, 400);
+        return;
+      }
+      const frame = captureFrame();
+      if (!frame) {
+        timer = window.setTimeout(tick, 400);
+        return;
+      }
+      state.scanNow = false;
+      let delayMs = state.interval * 1000;
+      setIsAnalyzing(true);
+      controller = new AbortController();
+      try {
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64: frame }),
+          signal: controller.signal,
+        });
+        const body = await res.json();
+        if (stopped) return;
+        if (!res.ok || !body.success) throw new Error(body.error || "Analysis failed.");
+        setAnalyzeError(null);
+        setRealAnalysis(body.data as DetectionResult);
+        setUploadedImageSrc(frame); // evidence image for any challan issued from this scan
+        setIssuedChallans({}); // vehicle ids (bike_1, car_1...) restart on every scan
+        setLastAnalyzedAt(Date.now());
+        setFramesAnalyzed((n) => n + 1);
+      } catch (err: any) {
+        if (stopped || err?.name === "AbortError") return;
+        setAnalyzeError(err.message || "Live scan failed.");
+        delayMs = Math.max(delayMs, 6000); // back off after an error
+      } finally {
+        if (!stopped) setIsAnalyzing(false);
+      }
+      if (!stopped) timer = window.setTimeout(tick, delayMs);
+    };
+
+    timer = window.setTimeout(tick, 800); // let the camera warm up
+    return () => {
+      stopped = true;
+      if (timer) window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [mode]);
+
   const toggleSimulation = () => {
     setIsPlaying(!isPlaying);
   };
@@ -447,6 +727,9 @@ export default function Dashboard() {
   };
 
   const backToLiveFeed = () => {
+    stopCamera();
+    setIsAnalyzing(false);
+    setScanning(true);
     setMode("live");
     setUploadedImageSrc(null);
     setRealAnalysis(null);
@@ -523,28 +806,36 @@ export default function Dashboard() {
                   ))}
                   <span className="w-px h-4 bg-slate-800 mx-1" />
                   <button
-                    onClick={handleAttachImageClick}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-indigo-400 border border-indigo-900/50 hover:bg-slate-800 transition-all"
-                    title="Attach a real photo to analyze instead of the simulated feed"
+                    onClick={startCamera}
+                    disabled={cameraStarting}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-indigo-400 border border-indigo-900/50 hover:bg-slate-800 disabled:opacity-60 transition-all"
+                    title="Use your camera as a live feed and analyze it with the real YOLO + Gemini pipeline"
                   >
-                    <Upload className="w-3 h-3" /> Attach Image
+                    {cameraStarting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Video className="w-3 h-3" />} Live Feed
                   </button>
                 </>
               ) : (
                 <>
                   <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-950 text-indigo-400 border border-indigo-800/40">
-                    Attached Image (Real Analysis)
+                    {mode === "camera" ? "Live Camera (Real Analysis)" : "Attached Image (Real Analysis)"}
                   </span>
                   <button
                     onClick={backToLiveFeed}
                     className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200 transition-all"
                   >
-                    <X className="w-3 h-3" /> Back to Live Feed
+                    <X className="w-3 h-3" /> {mode === "camera" ? "Stop Camera" : "Back to Live Feed"}
                   </button>
                 </>
               )}
             </div>
           </div>
+
+          {cameraError && (
+            <div className="mx-4 mt-3 bg-red-950/30 border border-red-800/50 p-2.5 rounded-lg text-red-400 text-[11px] leading-relaxed flex items-start justify-between gap-2">
+              <span>{cameraError}</span>
+              <button onClick={() => setCameraError(null)} className="text-red-400 hover:text-red-200 shrink-0"><X className="w-3 h-3" /></button>
+            </div>
+          )}
 
           {/* Interactive Canvas Viewport */}
           <div className="relative bg-slate-950 flex items-center justify-center p-4">
@@ -554,6 +845,8 @@ export default function Dashboard() {
               height={340}
               className="w-full h-auto aspect-[800/340] rounded-xl border border-slate-800 overflow-hidden"
             />
+            {/* Camera source (kept in the page but invisible; the canvas above shows it) */}
+            <video ref={videoRef} muted playsInline className="absolute w-px h-px opacity-0 pointer-events-none" />
 
             {mode === "upload" && isAnalyzing && (
               <div className="absolute inset-4 flex flex-col items-center justify-center gap-2 bg-slate-950/80 rounded-xl">
@@ -604,6 +897,45 @@ export default function Dashboard() {
               >
                 <PlusCircle className="w-3.5 h-3.5" /> INJECT TEST infraction
               </button>
+            </div>
+          ) : mode === "camera" ? (
+            <div className="bg-slate-950/80 px-5 py-3.5 border-t border-slate-800 flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setScanning((v) => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold font-mono transition-all ${
+                    scanning
+                      ? "bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-950/30"
+                      : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-950/30"
+                  }`}
+                  title={scanning ? "Stop scanning and hold the last analysed frame so you can review / issue challans" : "Resume continuous scanning"}
+                >
+                  {scanning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  {scanning ? "FREEZE & REVIEW" : "RESUME LIVE SCAN"}
+                </button>
+                {!scanning && (
+                  <button
+                    onClick={() => {
+                      cam.current.scanNow = true;
+                    }}
+                    disabled={isAnalyzing}
+                    className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-300 border border-slate-800 rounded-lg text-xs font-mono transition-all"
+                  >
+                    SCAN NOW
+                  </button>
+                )}
+                <button
+                  onClick={() => setScanIntervalSec((p) => (p === 3 ? 5 : p === 5 ? 10 : 3))}
+                  className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 hover:border-slate-700 rounded-lg text-xs font-mono transition-all"
+                  title="Pause between one scan finishing and the next one starting"
+                >
+                  GAP: {scanIntervalSec}s
+                </button>
+              </div>
+              <span className="text-[11px] text-slate-500 font-mono flex items-center gap-1.5">
+                <Video className="w-3.5 h-3.5 text-indigo-400" />
+                {!scanning ? "Frozen — review results, then resume" : isAnalyzing ? "Scanning frame..." : `Live • ${framesAnalyzed} frames scanned`}
+              </span>
             </div>
           ) : (
             <div className="bg-slate-950/80 px-5 py-3.5 border-t border-slate-800 flex items-center justify-between flex-wrap gap-2">
@@ -662,7 +994,7 @@ export default function Dashboard() {
               <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">VEHICLES DETECTED</span>
               <div className="mt-2 flex items-baseline gap-2">
                 <span className="text-2xl font-bold font-display text-white">{totalVehiclesDetected}</span>
-                <span className="text-[10px] font-mono text-indigo-400">This Image</span>
+                <span className="text-[10px] font-mono text-indigo-400">{mode === "camera" ? "Latest Frame" : "This Image"}</span>
               </div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl flex flex-col justify-between">
@@ -680,7 +1012,7 @@ export default function Dashboard() {
             <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl flex flex-col justify-between">
               <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">SOURCE</span>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-sm font-bold font-display text-slate-300">REAL IMAGE</span>
+                <span className="text-sm font-bold font-display text-slate-300">{mode === "camera" ? "LIVE CAMERA" : "REAL IMAGE"}</span>
               </div>
             </div>
           </div>
@@ -796,19 +1128,30 @@ export default function Dashboard() {
             </div>
 
             <div className="flex-1 overflow-y-auto mt-4 space-y-3">
-              {isAnalyzing ? (
+              {mode === "camera" && (
+                <div className="text-[10px] font-mono text-slate-500 flex items-center gap-1.5">
+                  {isAnalyzing ? <Loader2 className="w-3 h-3 animate-spin text-indigo-400" /> : <ScanLine className="w-3 h-3 text-indigo-400" />}
+                  {isAnalyzing ? "Scanning latest frame..." : lastAnalyzedAt ? `Results from last scan • ${framesAnalyzed} frames scanned` : "Waiting for the first scan..."}
+                </div>
+              )}
+              {mode === "camera" && analyzeError && (
+                <div className="bg-red-950/30 border border-red-800/50 p-3 rounded-xl text-red-400 text-[11px] leading-relaxed">
+                  {analyzeError}
+                </div>
+              )}
+              {isAnalyzing && mode !== "camera" ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2 py-10">
                   <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
                   <p className="text-xs font-mono">Running Gemini Vision + OCR pipeline...</p>
                 </div>
-              ) : analyzeError ? (
+              ) : analyzeError && mode !== "camera" ? (
                 <div className="bg-red-950/30 border border-red-800/50 p-3 rounded-xl text-red-400 text-[11px] leading-relaxed">
                   {analyzeError}
                 </div>
               ) : !realAnalysis || totalVehiclesDetected === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 text-center py-10">
                   <FileCheck className="w-8 h-8 text-slate-600 mb-2" />
-                  <p className="text-xs font-mono">No vehicles detected in this image.</p>
+                  <p className="text-xs font-mono">{mode === "camera" ? (realAnalysis ? "No vehicles in the latest frame." : "Waiting for the first scan...") : "No vehicles detected in this image."}</p>
                 </div>
               ) : (
                 <>

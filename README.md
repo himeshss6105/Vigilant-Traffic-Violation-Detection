@@ -84,12 +84,21 @@ Built as a final-year engineering project with a focus on practical deployabilit
 
 ```mermaid
 flowchart LR
+<<<<<<< HEAD
     A["Video Input (CCTV / Uploaded)"] --> B["Node.js + Express Server"]
     B --> C["YOLOv11 Service (FastAPI, port 8001)"]
     B --> D["Gemini Vision API"]
     C --> E["Fusion Layer (server-lib/fusion.ts)"]
     D --> E
     E --> F["React Dashboard (Violations and Evidence)"]
+=======
+    A[📹 Video Input<br/>CCTV / Uploaded] --> B[🖥️ Node.js + Express Server]
+    B --> C[🎯 YOLOv11 Service<br/>FastAPI · port 8001]
+    B --> D[✨ Gemini Vision API]
+    C --> E[🔀 Fusion Layer<br/>server-lib/fusion.ts]
+    D --> E
+    E --> F[📊 React Dashboard<br/>Violations & Evidence]
+>>>>>>> 5340963 (Complete project: YOLOv11 service, fusion layer, Gemini integration, updated dashboard and README)
 ```
 
 1. The video is sent to the Express server.

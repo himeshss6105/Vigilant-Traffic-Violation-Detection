@@ -3,10 +3,13 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import sharp from "sharp";
 import { detectPlateText } from "./server-lib/ocr";
 import { generateChallanPdf, generateChallanId } from "./server-lib/challan";
 import { insertChallan, listChallans, getChallanById, updateChallan, deleteChallan } from "./server-lib/db";
 import { computeFine } from "./src/fines";
+import { fuseYoloWithGemini } from "./server-lib/fusion";
+import type { YoloResponse } from "./server-lib/fusion";
 import { ChallanRequest, ChallanRecord, ChallanUpdateRequest } from "./src/types";
 
 dotenv.config();
@@ -15,7 +18,7 @@ const app = express();
 const PORT = 3000;
 
 // Set up JSON body parser with a generous limit for base64 images
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "25mb" }));
 
 // Helper to initialize Gemini SDK
 let aiClient: GoogleGenAI | null = null;
@@ -28,6 +31,7 @@ function getGeminiClient(): GoogleGenAI {
     aiClient = new GoogleGenAI({
       apiKey: apiKey,
       httpOptions: {
+        timeout: 90_000, // fail in 90s instead of hanging
         headers: {
           "User-Agent": "aistudio-build",
         },
@@ -137,6 +141,103 @@ const PRESET_SIMULATIONS: Record<string, any> = {
   }
 };
 
+// Models to try, in order. Set GEMINI_MODEL in .env to override the first choice.
+// If a model name does not exist (404) or is overloaded (503/429) the next one is tried.
+function getGeminiModelCandidates(): string[] {
+  const list = [
+    process.env.GEMINI_MODEL,
+    "gemini-2.5-flash",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-flash-latest",
+  ]
+    .map((m) => (m || "").trim())
+    .filter(Boolean);
+  return Array.from(new Set(list));
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function isOverloaded(err: any): boolean {
+  const msg = String(err?.message || err);
+  const status = err?.status ?? err?.code;
+  return status === 503 || /UNAVAILABLE|high demand|overloaded/i.test(msg);
+}
+
+// A request that hung and was cut off by our own time limit.
+function isTimeout(err: any): boolean {
+  const msg = String(err?.message || err);
+  return err?.name === "AbortError" || err?.name === "TimeoutError" || err?.code === 20 || err?.code === 23 || /aborted|timed? ?out/i.test(msg);
+}
+
+const GEMINI_ATTEMPT_TIMEOUT_MS = 40_000; // one stuck request is cut off after 40s...
+const GEMINI_TOTAL_BUDGET_MS = 120_000; // ...and we stop trying new models after 2 minutes overall.
+
+async function generateWithFallback(ai: GoogleGenAI, params: any) {
+  let lastError: any;
+  const deadline = Date.now() + GEMINI_TOTAL_BUDGET_MS;
+  for (const model of getGeminiModelCandidates()) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      if (Date.now() > deadline) throw lastError ?? new Error("Gemini did not respond in time.");
+      try {
+        console.log(`[CV Engine] Dispatching request to Gemini model '${model}' (try ${attempt})...`);
+        const started = Date.now();
+        // Box detection does not need long "thinking"; on 2.5 models it can add a minute+ of latency.
+        const baseConfig = /^gemini-2\.5/.test(model)
+          ? { ...params.config, thinkingConfig: { thinkingBudget: 0 } }
+          : params.config;
+        const config = { ...baseConfig, abortSignal: AbortSignal.timeout(GEMINI_ATTEMPT_TIMEOUT_MS) };
+        const result = await ai.models.generateContent({ ...params, config, model });
+        console.log(`[CV Engine] Gemini '${model}' answered in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+        return result;
+      } catch (err: any) {
+        lastError = err;
+        const msg = String(err?.message || err);
+        const status = err?.status ?? err?.code;
+        const cause = err?.cause?.code || err?.cause?.message || "";
+        console.warn(`[CV Engine] Model '${model}' failed (${status ?? "no status"}): ${msg.slice(0, 200)}${cause ? " | cause: " + cause : ""}`);
+        if (isOverloaded(err) && attempt === 1) {
+          await sleep(1500);
+          continue; // retry the same model once
+        }
+        const moveOn =
+          isOverloaded(err) ||
+          isTimeout(err) || // a hung model: try a different one instead of giving up
+          status === 404 || status === 429 ||
+          /not found|NOT_FOUND|RESOURCE_EXHAUSTED/i.test(msg);
+        if (!moveOn) throw err; // bad API key, bad request... other models will not help
+        break; // go to the next model
+      }
+    }
+  }
+  throw lastError;
+}
+
+// Calls the Python YOLO service. Never throws: returns null if it is down so
+// the Gemini-only workflow keeps working.
+async function runYolo(imageBase64: string): Promise<YoloResponse | null> {
+  try {
+    const clean = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const form = new FormData();
+    form.append("image", new Blob([Buffer.from(clean, "base64")], { type: "image/jpeg" }), "traffic-image.jpg");
+    const resp = await fetch(process.env.YOLO_SERVICE_URL || "http://127.0.0.1:8001/predict", {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!resp.ok) throw new Error(`YOLO service returned HTTP ${resp.status}`);
+    const data = (await resp.json()) as YoloResponse;
+    console.log(
+      `[YOLO] traffic=${data.traffic?.detections?.length ?? 0} mirrors=${data.mirrors?.detections?.length ?? 0}`
+    );
+    return data;
+  } catch (err: any) {
+    console.warn("[YOLO] Service unavailable; continuing with Gemini only:", err?.message || err);
+    return null;
+  }
+}
+
 // API Endpoint for AI Traffic Video/Image Analysis
 app.post("/api/analyze", async (req: express.Request, res: express.Response) => {
   const { imageBase64, presetId } = req.body;
@@ -170,11 +271,31 @@ app.post("/api/analyze", async (req: express.Request, res: express.Response) => 
     return res.status(400).json({ success: false, error: "Missing imageBase64 parameter." });
   }
 
-  try {
+   try {
+    // Start YOLO in parallel with Gemini (it never throws).
+    const yoloPromise = runYolo(imageBase64);
+
     const ai = getGeminiClient();
 
     // Strip out base64 prefix if present
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    console.log(`[CV Engine] Image received: ${(cleanBase64.length * 0.75 / 1024).toFixed(0)} KB`);
+
+    // Shrink the image before uploading to Gemini. Boxes are relative (0-1000), so this does not
+    // change coordinates, and a ~200 KB upload is far less likely to stall on a slow connection.
+    // YOLO and plate OCR keep using the full-quality original.
+    let geminiBase64 = cleanBase64;
+    try {
+      const small = await sharp(Buffer.from(cleanBase64, "base64"))
+        .rotate()
+        .resize({ width: 1280, height: 1280, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      geminiBase64 = small.toString("base64");
+      console.log(`[CV Engine] Resized for Gemini: ${(small.length / 1024).toFixed(0)} KB`);
+    } catch (resizeErr: any) {
+      console.warn("[CV Engine] Resize skipped, sending original:", resizeErr?.message || resizeErr);
+    }
 
     const systemInstruction = `
       You are a state-of-the-art computer vision system representing a Two-Stage YOLO-based Traffic Safety Compliance & Violation Detection pipeline.
@@ -203,15 +324,12 @@ app.post("/api/analyze", async (req: express.Request, res: express.Response) => 
 
     const prompt = "Analyze this traffic monitoring CCTV frame. Detect motorcycles, cars, riders, helmets, and seat belts.";
 
-    console.log("[CV Engine] Dispatching request to Gemini model 'gemini-3.5-flash'...");
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response = await generateWithFallback(ai, {
       contents: [
         {
           inlineData: {
             mimeType: "image/jpeg",
-            data: cleanBase64,
+            data: geminiBase64,
           },
         },
         { text: prompt },
@@ -334,6 +452,16 @@ app.post("/api/analyze", async (req: express.Request, res: express.Response) => 
     const parsedData = JSON.parse(textResult.trim());
     console.log("[CV Engine] Successfully parsed AI computer vision response!");
 
+    // Merge the trained YOLO detectors into Gemini's result (helmet, seatbelt, plate, mirror).
+    const yoloData = await yoloPromise;
+    let fusion = null;
+    try {
+      fusion = fuseYoloWithGemini(parsedData, yoloData);
+      if (fusion.applied) console.log("[Fusion]", JSON.stringify(fusion));
+    } catch (fuseErr: any) {
+      console.warn("[Fusion] Skipped due to error:", fuseErr?.message || fuseErr);
+    }
+
     // Stage 3: real OCR. Gemini only localizes the plate region (Stage 1/2 above);
     // the actual character recognition is done here with sharp (crop/preprocess)
     // + tesseract.js (OCR) on the original uploaded image, not by asking the LLM
@@ -360,13 +488,30 @@ app.post("/api/analyze", async (req: express.Request, res: express.Response) => 
       success: true,
       data: parsedData,
       isSimulated: false,
+      yolo: yoloData,
+      fusion,
     });
   } catch (error: any) {
-    console.error("[CV Engine] Error analyzing image:", error.message || error);
+    console.error("[CV Engine] Error analyzing image:", error?.message || error);
     // Return friendly error with fallbacks
+    if (isTimeout(error)) {
+      return res.status(504).json({
+        success: false,
+        error: "Gemini took too long to answer (Google is slow right now and every model we tried timed out). Please press Deploy again in a minute.",
+      });
+    }
+    if (isOverloaded(error)) {
+      return res.status(503).json({
+        success: false,
+        error: "Google's Gemini service is overloaded right now (every model we tried was busy). This is temporary - please press Deploy again in about a minute.",
+      });
+    }
+    const netCause = error?.cause?.code || error?.cause?.message;
     return res.status(500).json({
       success: false,
-      error: error.message || "An unexpected error occurred during AI computer vision processing.",
+      error:
+        (error.message || "An unexpected error occurred during AI computer vision processing.") +
+        (netCause ? ` (network cause: ${netCause}) - the server could not reach the Gemini API. Run: node test-gemini.mjs` : ""),
       details: "You can continue testing with presets or verify your API key in Secrets.",
     });
   }

@@ -227,7 +227,7 @@ function renderVisuals(type: Slide["visualType"]) {
 
           {/* YOLO Stage 1 */}
           <rect x="55" y="53" width="130" height="30" rx="4" fill="#022c22" stroke="#10b981" strokeWidth="1.5" />
-          <text x="120" y="67" fill="#ecfdf5" fontSize="9" fontFamily="sans-serif" fontWeight="bold" textAnchor="middle">Stage 1: YOLOv8 Detector</text>
+          <text x="120" y="67" fill="#ecfdf5" fontSize="9" fontFamily="sans-serif" fontWeight="bold" textAnchor="middle">Stage 1: YOLOv11 Detector</text>
           <text x="120" y="78" fill="#a7f3d0" fontSize="7" fontFamily="sans-serif" textAnchor="middle">Classes: [Car, Motorcycle]</text>
 
           {/* Split Arrows */}
@@ -289,7 +289,7 @@ function renderVisuals(type: Slide["visualType"]) {
                 <td className="p-2 text-right text-emerald-400">Excellent</td>
               </tr>
               <tr className="border-b border-slate-900 hover:bg-slate-900/30">
-                <td className="p-2 font-mono font-bold text-indigo-400">YOLOv8 Single</td>
+                <td className="p-2 font-mono font-bold text-indigo-400">YOLOv11 Single</td>
                 <td className="p-2 text-center text-indigo-400">~81.2%</td>
                 <td className="p-2 text-center text-emerald-400">45+ (Real-time)</td>
                 <td className="p-2 text-right text-amber-500">Moderate (Small Head)</td>
@@ -346,7 +346,7 @@ function renderVisuals(type: Slide["visualType"]) {
             {/* Bar 1 */}
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] font-semibold">
-                <span className="text-emerald-400 font-mono">Motorcycle Detection (YOLOv8m)</span>
+                <span className="text-emerald-400 font-mono">Motorcycle Detection (YOLOv11)</span>
                 <span>92.4%</span>
               </div>
               <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-800">
