@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import { ChallanRecord } from "../src/types";
+import { maskPhone } from "./registry";
 
 /**
  * Renders a ChallanRecord into an A5 PDF "bill" containing the plate number,
@@ -41,7 +42,27 @@ export function generateChallanPdf(record: ChallanRecord, evidenceImageBuffer?: 
       doc.text(`Date / Time: ${new Date(record.timestamp).toLocaleString()}`);
       doc.text(`Vehicle Type: ${record.vehicleType.toUpperCase()}`);
       doc.text(`Number Plate: ${record.plateNumber || "NOT DETECTED - MANUAL REVIEW REQUIRED"}`);
-      doc.moveDown(1);
+
+      // Registered owner block (only when the plate was found in the registry)
+      const hasOwner = Boolean(record.ownerName);
+      if (hasOwner) {
+        const modelLine = [record.vehicleModel, record.vehicleLabel ? `(${record.vehicleLabel})` : ""]
+          .filter(Boolean)
+          .join(" ");
+        doc.text(`Registered Owner: ${record.ownerName}`);
+        if (modelLine) doc.text(`Vehicle: ${modelLine}`);
+        if (record.ownerPhone) doc.text(`Mobile: ${maskPhone(record.ownerPhone)}`);
+        doc
+          .fontSize(8)
+          .fillColor("#64748b")
+          .text(
+            record.registryMatch === "corrected"
+              ? "Owner details from the simulated registry (plate matched after OCR correction)."
+              : "Owner details from the simulated registry (exact plate match)."
+          );
+        doc.fontSize(11).fillColor("#0f172a");
+      }
+      doc.moveDown(hasOwner ? 0.6 : 1);
 
       doc.fontSize(12).fillColor("#0f172a").text("Violations Detected:", { underline: true });
       doc.moveDown(0.4);
@@ -81,14 +102,26 @@ export function generateChallanPdf(record: ChallanRecord, evidenceImageBuffer?: 
         doc.fontSize(9).fillColor("#64748b").text("Evidence Snapshot:");
         doc.moveDown(0.3);
         try {
-          doc.image(evidenceImageBuffer, { fit: [350, 220], align: "center" });
+          // Place the image explicitly and move the cursor below it ourselves: the cursor is not
+          // advanced reliably by every PDFKit version, which let the disclaimer print over the image.
+          const [boxW, boxH] = hasOwner ? [330, 150] : [350, 220];
+          const image = (doc as any).openImage(evidenceImageBuffer);
+          const scale = Math.min(boxW / image.width, boxH / image.height);
+          const drawW = image.width * scale;
+          const drawH = image.height * scale;
+          const contentW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+          const imgX = doc.page.margins.left + (contentW - drawW) / 2;
+          const imgY = doc.y;
+          doc.image(image, imgX, imgY, { width: drawW, height: drawH });
+          doc.x = doc.page.margins.left;
+          doc.y = imgY + drawH + 6;
         } catch (imgErr) {
           // Never let a bad/unsupported image format break the whole PDF
           console.error("[Challan] Could not embed evidence image:", (imgErr as Error).message);
         }
       }
 
-      doc.moveDown(2);
+      doc.moveDown(1.5);
       doc
         .fontSize(8)
         .fillColor("#94a3b8")

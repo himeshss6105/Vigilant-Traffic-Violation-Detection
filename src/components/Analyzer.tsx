@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import { PresetImage, DetectionResult } from "../types";
 import { PRESET_IMAGES } from "../data";
 import { issueChallan } from "../challanClient";
+import RegistryInfo from "./RegistryInfo";
 import { 
   Upload, 
   Sparkles, 
@@ -627,6 +628,7 @@ export default function Analyzer({ onNavigateToRecords }: { onNavigateToRecords?
                               {bike.plateText || "Not Detected"}
                             </span>
                           </div>
+                          <RegistryInfo registry={bike.registry} plateText={bike.plateText} />
                         </div>
 
                         {/* Detailed rider status breakdown */}
@@ -721,6 +723,7 @@ export default function Analyzer({ onNavigateToRecords }: { onNavigateToRecords?
                               {car.plateText || "Not Detected"}
                             </span>
                           </div>
+                          <RegistryInfo registry={car.registry} plateText={car.plateText} />
                         </div>
 
                         {/* Occupant breakdown */}

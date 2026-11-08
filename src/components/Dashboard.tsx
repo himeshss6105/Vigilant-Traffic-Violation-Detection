@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { LogEntry, DetectionResult, BoundingBox } from "../types";
 import { deriveBikeViolations, deriveCarViolations } from "../fines";
 import { issueChallan } from "../challanClient";
+import RegistryInfo from "./RegistryInfo";
 import { 
   Play, 
   Pause, 
@@ -1173,6 +1174,7 @@ export default function Dashboard() {
                         <div className="text-[10px] font-mono text-slate-500">
                           Plate: <span className={bike.plateText ? "text-slate-300 font-bold" : "text-amber-500"}>{bike.plateText || "Not Detected"}</span>
                         </div>
+                        <RegistryInfo registry={bike.registry} plateText={bike.plateText} compact />
                         {isViolation && (
                           issuedChallans[bike.id] ? (
                             <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
@@ -1206,6 +1208,7 @@ export default function Dashboard() {
                         <div className="text-[10px] font-mono text-slate-500">
                           Plate: <span className={car.plateText ? "text-slate-300 font-bold" : "text-amber-500"}>{car.plateText || "Not Detected"}</span>
                         </div>
+                        <RegistryInfo registry={car.registry} plateText={car.plateText} compact />
                         {isViolation && (
                           issuedChallans[car.id] ? (
                             <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">

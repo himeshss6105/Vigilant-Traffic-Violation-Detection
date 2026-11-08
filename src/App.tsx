@@ -3,6 +3,7 @@ import Presentation from "./components/Presentation";
 import Dashboard from "./components/Dashboard";
 import Analyzer from "./components/Analyzer";
 import ChallanRecords from "./components/ChallanRecords";
+import VehicleRegistry from "./components/VehicleRegistry";
 import { ACADEMIC_REFERENCES } from "./data";
 import { 
   Eye, 
@@ -16,12 +17,13 @@ import {
   ClipboardCheck,
   Check,
   Sparkles,
-  Receipt
+  Receipt,
+  Users
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'slides' | 'dashboard' | 'analyzer' | 'records'>('slides');
+  const [activeTab, setActiveTab] = useState<'slides' | 'dashboard' | 'analyzer' | 'records' | 'registry'>('slides');
   const [copiedRefId, setCopiedRefId] = useState<number | null>(null);
   const [refSearch, setRefSearch] = useState("");
 
@@ -107,6 +109,16 @@ export default function App() {
             >
               <Receipt className="w-3.5 h-3.5" /> Challan Records
             </button>
+            <button
+              onClick={() => setActiveTab('registry')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all ${
+                activeTab === 'registry'
+                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/40"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" /> Vehicle Registry
+            </button>
           </div>
         </div>
       </header>
@@ -125,16 +137,16 @@ export default function App() {
               Deep Learning Traffic Surveillance Platform
             </h2>
             <p className="text-xs text-slate-400 leading-relaxed">
-              This system implements a advanced two-stage inspection protocol. Stage 1 isolates vehicles (Cars & Motorcycles). Stage 2 processes localized crops (Windshields & Riders) to enforce safety policies like helmet wearing, occupant limits (no triple riding), and driver/passenger seatbelt securing.
+              This system combines Gemini Vision scene analysis, which locates vehicles, riders, occupants and plates, with two locally trained YOLOv11 models that check helmets, seat belts, triple riding, plates and rear-view mirrors. Detections are fused, plates are read with OCR, and violations are turned into e-challans.
             </p>
           </div>
 
           <div className="flex flex-col gap-2 shrink-0">
             <div className="bg-slate-900/80 px-3.5 py-2 rounded-xl border border-slate-800 text-[11px] font-mono">
-              <span className="text-slate-500">ENGINE:</span> <span className="text-indigo-400 font-bold">YOLOv11 + CLAHE</span>
+              <span className="text-slate-500">ENGINE:</span> <span className="text-indigo-400 font-bold">YOLOv11 + Gemini Vision</span>
             </div>
             <div className="bg-slate-900/80 px-3.5 py-2 rounded-xl border border-slate-800 text-[11px] font-mono">
-              <span className="text-slate-500">ACCURACY:</span> <span className="text-emerald-400 font-bold">92.4% mAP@0.5</span>
+              <span className="text-slate-500">ACCURACY:</span> <span className="text-emerald-400 font-bold">95.9% / 93.3% mAP@0.5</span>
             </div>
           </div>
         </div>
@@ -154,6 +166,7 @@ export default function App() {
               {activeTab === 'dashboard' && <Dashboard />}
               {activeTab === 'analyzer' && <Analyzer onNavigateToRecords={() => setActiveTab('records')} />}
               {activeTab === 'records' && <ChallanRecords />}
+              {activeTab === 'registry' && <VehicleRegistry />}
             </motion.div>
           </AnimatePresence>
         </div>

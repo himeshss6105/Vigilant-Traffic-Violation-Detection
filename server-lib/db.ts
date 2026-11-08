@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import fs from "fs";
-import { ChallanRecord, ChallanStatus, FineRule } from "../src/types";
+import { ChallanRecord, ChallanStatus, FineRule, RegisteredVehicle } from "../src/types";
 
 /**
  * We use Node's built-in `node:sqlite` module (stable since Node 22.5,
@@ -37,6 +37,66 @@ db.exec(`
   );
 `);
 
+// Older databases were created before owner details existed: add the new
+// columns if they are missing (idempotent; existing challans are untouched).
+{
+  const existingCols = new Set(
+    (db.prepare(`PRAGMA table_info(challans)`).all() as unknown as Array<{ name: string }>).map((c) => c.name)
+  );
+  for (const col of ["owner_name", "owner_phone", "vehicle_model", "vehicle_label", "registry_match"]) {
+    if (!existingCols.has(col)) db.exec(`ALTER TABLE challans ADD COLUMN ${col} TEXT`);
+  }
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS vehicles (
+    plate TEXT PRIMARY KEY,
+    owner_name TEXT NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
+    vehicle_model TEXT NOT NULL DEFAULT '',
+    vehicle_label TEXT NOT NULL,
+    vehicle_class TEXT NOT NULL
+  );
+`);
+
+interface VehicleRow {
+  plate: string;
+  owner_name: string;
+  phone: string;
+  vehicle_model: string;
+  vehicle_label: string;
+  vehicle_class: string;
+}
+
+export function replaceVehicles(vehicles: RegisteredVehicle[]): void {
+  db.exec("BEGIN");
+  try {
+    db.exec(`DELETE FROM vehicles`);
+    const stmt = db.prepare(
+      `INSERT INTO vehicles (plate, owner_name, phone, vehicle_model, vehicle_label, vehicle_class) VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    for (const v of vehicles) {
+      stmt.run(v.plate, v.ownerName, v.phone, v.vehicleModel, v.vehicleLabel, v.vehicleClass);
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+export function listVehicles(): RegisteredVehicle[] {
+  const rows = db.prepare(`SELECT * FROM vehicles ORDER BY plate`).all() as unknown as VehicleRow[];
+  return rows.map((r) => ({
+    plate: r.plate,
+    ownerName: r.owner_name,
+    phone: r.phone,
+    vehicleModel: r.vehicle_model,
+    vehicleLabel: r.vehicle_label,
+    vehicleClass: r.vehicle_class as "motorcycle" | "car",
+  }));
+}
+
 interface ChallanRow {
   challan_id: string;
   vehicle_id: string;
@@ -49,6 +109,11 @@ interface ChallanRow {
   evidence_image: string | null;
   created_at: string;
   updated_at: string;
+  owner_name: string | null;
+  owner_phone: string | null;
+  vehicle_model: string | null;
+  vehicle_label: string | null;
+  registry_match: string | null;
 }
 
 function rowToRecord(row: ChallanRow): ChallanRecord {
@@ -64,14 +129,20 @@ function rowToRecord(row: ChallanRow): ChallanRecord {
     timestamp: row.created_at,
     updatedAt: row.updated_at,
     evidenceImageBase64: row.evidence_image ?? undefined,
+    ownerName: row.owner_name ?? undefined,
+    ownerPhone: row.owner_phone ?? undefined,
+    vehicleModel: row.vehicle_model ?? undefined,
+    vehicleLabel: row.vehicle_label ?? undefined,
+    registryMatch: (row.registry_match as "exact" | "corrected" | null) ?? undefined,
   };
 }
 
 export function insertChallan(record: ChallanRecord): void {
   db.prepare(
     `INSERT INTO challans
-      (challan_id, vehicle_id, vehicle_type, plate_number, violations, line_items, total_fine, status, evidence_image, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (challan_id, vehicle_id, vehicle_type, plate_number, violations, line_items, total_fine, status, evidence_image, created_at, updated_at,
+       owner_name, owner_phone, vehicle_model, vehicle_label, registry_match)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     record.challanId,
     record.vehicleId,
@@ -83,7 +154,12 @@ export function insertChallan(record: ChallanRecord): void {
     record.status,
     record.evidenceImageBase64 ?? null,
     record.timestamp,
-    record.updatedAt
+    record.updatedAt,
+    record.ownerName ?? null,
+    record.ownerPhone ?? null,
+    record.vehicleModel ?? null,
+    record.vehicleLabel ?? null,
+    record.registryMatch ?? null
   );
 }
 
@@ -108,20 +184,43 @@ export function updateChallan(
     lineItems?: FineRule[];
     totalFine?: number;
     status?: ChallanStatus;
+    /** undefined = keep the current owner details; null = clear them; object = replace them. */
+    owner?: {
+      ownerName: string;
+      ownerPhone: string;
+      vehicleModel: string;
+      vehicleLabel: string;
+      registryMatch: "exact" | "corrected";
+    } | null;
   }
 ): ChallanRecord | null {
   const existing = getChallanById(challanId);
   if (!existing) return null;
 
+  const { owner, ...fields } = updates;
   const merged: ChallanRecord = {
     ...existing,
-    ...updates,
+    ...fields,
     updatedAt: new Date().toISOString(),
   };
+  if (owner === null) {
+    merged.ownerName = undefined;
+    merged.ownerPhone = undefined;
+    merged.vehicleModel = undefined;
+    merged.vehicleLabel = undefined;
+    merged.registryMatch = undefined;
+  } else if (owner) {
+    merged.ownerName = owner.ownerName;
+    merged.ownerPhone = owner.ownerPhone;
+    merged.vehicleModel = owner.vehicleModel;
+    merged.vehicleLabel = owner.vehicleLabel;
+    merged.registryMatch = owner.registryMatch;
+  }
 
   db.prepare(
     `UPDATE challans
-     SET plate_number = ?, violations = ?, line_items = ?, total_fine = ?, status = ?, updated_at = ?
+     SET plate_number = ?, violations = ?, line_items = ?, total_fine = ?, status = ?, updated_at = ?,
+         owner_name = ?, owner_phone = ?, vehicle_model = ?, vehicle_label = ?, registry_match = ?
      WHERE challan_id = ?`
   ).run(
     merged.plateNumber,
@@ -130,6 +229,11 @@ export function updateChallan(
     merged.totalFine,
     merged.status,
     merged.updatedAt,
+    merged.ownerName ?? null,
+    merged.ownerPhone ?? null,
+    merged.vehicleModel ?? null,
+    merged.vehicleLabel ?? null,
+    merged.registryMatch ?? null,
     challanId
   );
 

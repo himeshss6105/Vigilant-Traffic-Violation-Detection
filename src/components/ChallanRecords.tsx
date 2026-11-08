@@ -144,7 +144,7 @@ export default function ChallanRecords() {
 
   const filtered = records.filter((r) => {
     const q = search.trim().toLowerCase();
-    const matchesSearch = q === "" || r.plateNumber.toLowerCase().includes(q) || r.challanId.toLowerCase().includes(q);
+    const matchesSearch = q === "" || r.plateNumber.toLowerCase().includes(q) || r.challanId.toLowerCase().includes(q) || (r.ownerName || "").toLowerCase().includes(q);
     const matchesStatus = statusFilter === "all" || r.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -359,6 +359,13 @@ export default function ChallanRecords() {
                           </span>
                         ))}
                       </div>
+                      {r.ownerName && (
+                        <div className="w-full text-[11px] font-mono text-slate-400">
+                          Owner: <span className="text-slate-200 font-semibold">{r.ownerName}</span>
+                          {r.vehicleModel ? <> • {r.vehicleModel}{r.vehicleLabel ? ` (${r.vehicleLabel})` : ""}</> : null}
+                          {r.ownerPhone ? <> • {r.ownerPhone}</> : null}
+                        </div>
+                      )}
                     </div>
                     <div className="text-sm font-bold text-slate-200 font-mono flex items-center gap-1.5">
                       <CheckCircle2 className="w-3.5 h-3.5 text-slate-600" /> Rs. {r.totalFine}

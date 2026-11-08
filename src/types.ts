@@ -1,5 +1,34 @@
 export type BoundingBox = [number, number, number, number]; // [ymin, xmin, ymax, xmax] in 0-1000 scale
 
+export type VehicleClass = 'motorcycle' | 'car';
+
+/** One row of the simulated vehicle registry (data/vehicles.csv). */
+export interface RegisteredVehicle {
+  plate: string;
+  ownerName: string;
+  phone: string; // full number; always masked before it leaves the server
+  vehicleModel: string;
+  vehicleLabel: string; // Car | Scooter | Bike
+  vehicleClass: VehicleClass;
+}
+
+/** Registry row as sent to the browser (phone already masked). */
+export interface RegisteredVehiclePublic {
+  plate: string;
+  ownerName: string;
+  phoneMasked: string;
+  vehicleModel: string;
+  vehicleLabel: string;
+  vehicleClass: VehicleClass;
+}
+
+/** Result of matching a detected plate against the registry. */
+export interface RegistryMatch extends RegisteredVehiclePublic {
+  matchType: 'exact' | 'corrected';
+  readAs: string; // what OCR / the vision model read before matching
+  distance: number;
+}
+
 export interface Rider {
   box: BoundingBox;
   hasHelmet: boolean;
@@ -15,6 +44,9 @@ export interface Motorcycle {
   plateBox?: BoundingBox;
   plateText?: string;
   plateConfidence?: number;
+  plateTextGuess?: string; // plate characters as read by the vision model
+  plateTextRaw?: string; // reading before it was replaced by the registered plate
+  registry?: RegistryMatch;
 }
 
 export interface Occupant {
@@ -33,6 +65,9 @@ export interface Car {
   plateBox?: BoundingBox;
   plateText?: string;
   plateConfidence?: number;
+  plateTextGuess?: string;
+  plateTextRaw?: string;
+  registry?: RegistryMatch;
 }
 
 export interface DetectionResult {
@@ -87,6 +122,12 @@ export interface ChallanRecord {
   lineItems: FineRule[];
   status: ChallanStatus;
   evidenceImageBase64?: string;
+  // Owner details, filled from the registry when the plate matches a registered vehicle
+  ownerName?: string;
+  ownerPhone?: string;
+  vehicleModel?: string;
+  vehicleLabel?: string;
+  registryMatch?: 'exact' | 'corrected';
 }
 
 export interface ChallanUpdateRequest {

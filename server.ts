@@ -6,11 +6,12 @@ import dotenv from "dotenv";
 import sharp from "sharp";
 import { detectPlateText } from "./server-lib/ocr";
 import { generateChallanPdf, generateChallanId } from "./server-lib/challan";
-import { insertChallan, listChallans, getChallanById, updateChallan, deleteChallan } from "./server-lib/db";
+import { insertChallan, listChallans, getChallanById, updateChallan, deleteChallan, listVehicles, replaceVehicles } from "./server-lib/db";
+import { attachRegistry, loadRegistryCsv, registryCsvPath, matchPlate, maskPhone } from "./server-lib/registry";
 import { computeFine } from "./src/fines";
 import { fuseYoloWithGemini } from "./server-lib/fusion";
 import type { YoloResponse } from "./server-lib/fusion";
-import { ChallanRequest, ChallanRecord, ChallanUpdateRequest } from "./src/types";
+import { ChallanRequest, ChallanRecord, ChallanUpdateRequest, RegisteredVehiclePublic } from "./src/types";
 
 dotenv.config();
 
@@ -306,6 +307,7 @@ app.post("/api/analyze", async (req: express.Request, res: express.Response) => 
       - For each motorcycle, isolate its bounding box.
       - For each car, isolate its bounding box and the windshield Region of Interest (ROI).
       - For each motorcycle and car, also isolate the tight bounding box around its visible number/license plate, if any part of it is visible. This box must hug the plate as closely as possible since it will be cropped out separately for character recognition.
+      - For every plate you can see, also write the characters you can actually read into plateTextGuess (uppercase letters and digits only, no spaces or dashes). Use an empty string if the plate is not legible, and never invent characters you cannot see.
 
       Stage 2: Feature Extraction and Violation Checking
       - For each motorcycle:
@@ -360,6 +362,10 @@ app.post("/api/analyze", async (req: express.Request, res: express.Response) => 
                     description: "Tight license plate bounding box [ymin, xmin, ymax, xmax], omitted if no plate is visible",
                     items: { type: Type.INTEGER }
                   },
+                  plateTextGuess: {
+                    type: Type.STRING,
+                    description: "License plate characters as read from the image (uppercase letters and digits only, no spaces); empty string if not legible"
+                  },
                   riders: {
                     type: Type.ARRAY,
                     description: "Persons riding this motorcycle",
@@ -403,6 +409,10 @@ app.post("/api/analyze", async (req: express.Request, res: express.Response) => 
                     type: Type.ARRAY,
                     description: "Tight license plate bounding box [ymin, xmin, ymax, xmax], omitted if no plate is visible",
                     items: { type: Type.INTEGER }
+                  },
+                  plateTextGuess: {
+                    type: Type.STRING,
+                    description: "License plate characters as read from the image (uppercase letters and digits only, no spaces); empty string if not legible"
                   },
                   occupants: {
                     type: Type.ARRAY,
@@ -484,6 +494,28 @@ app.post("/api/analyze", async (req: express.Request, res: express.Response) => 
       })
     );
 
+    // Stage 4: closed-set lookup in the simulated vehicle registry. A reading is matched
+    // only when it is clearly closest to ONE registered plate of the same vehicle class.
+    try {
+      const registry = listVehicles();
+      if (registry.length > 0) {
+        const attach = (list: any[] | undefined, cls: "motorcycle" | "car") =>
+          (list || []).forEach((v) => {
+            const read = v.plateText || v.plateTextGuess;
+            const m = attachRegistry(v, cls, registry);
+            if (m) {
+              console.log(`[Registry] ${v.id ?? cls}: read "${m.readAs}" -> ${m.vehicle.plate} (${m.vehicle.ownerName}, ${m.matchType})`);
+            } else if (read) {
+              console.log(`[Registry] ${v.id ?? cls}: "${read}" not found in the registry`);
+            }
+          });
+        attach(parsedData.motorcycles, "motorcycle");
+        attach(parsedData.cars, "car");
+      }
+    } catch (regErr: any) {
+      console.warn("[Registry] Lookup skipped:", regErr?.message || regErr);
+    }
+
     return res.json({
       success: true,
       data: parsedData,
@@ -521,6 +553,29 @@ app.post("/api/analyze", async (req: express.Request, res: express.Response) => 
 // challan to the database. Deliberately does NOT return a PDF - issuing a
 // challan just records it; the PDF is generated on demand later (see the
 // /pdf route below) from the Challan Records page.
+// Phone numbers never leave the server unmasked (set SHOW_FULL_PHONE=true in .env to change this).
+function publicChallan(rec: ChallanRecord): ChallanRecord {
+  return rec.ownerPhone ? { ...rec, ownerPhone: maskPhone(rec.ownerPhone) } : rec;
+}
+
+// API Endpoint: the simulated vehicle registry (read-only, phone numbers masked)
+app.get("/api/vehicles", (_req: express.Request, res: express.Response) => {
+  try {
+    const vehicles: RegisteredVehiclePublic[] = listVehicles().map((v) => ({
+      plate: v.plate,
+      ownerName: v.ownerName,
+      phoneMasked: maskPhone(v.phone),
+      vehicleModel: v.vehicleModel,
+      vehicleLabel: v.vehicleLabel,
+      vehicleClass: v.vehicleClass,
+    }));
+    return res.json({ success: true, vehicles, source: registryCsvPath() });
+  } catch (error: any) {
+    console.error("[Registry] Error listing vehicles:", error.message || error);
+    return res.status(500).json({ success: false, error: "Failed to load the vehicle registry." });
+  }
+});
+
 app.post("/api/challans", async (req: express.Request, res: express.Response) => {
   try {
     const { vehicleId, vehicleType, plateText, violations, evidenceImageBase64 } = req.body as ChallanRequest;
@@ -541,13 +596,22 @@ app.post("/api/challans", async (req: express.Request, res: express.Response) =>
       });
     }
 
+    // Attach the registered owner when the plate is in the registry (the server decides;
+    // the browser's owner details are never trusted).
+    const owner = matchPlate([plateText], listVehicles(), vehicleType === "car" ? "car" : "motorcycle");
+
     const now = new Date().toISOString();
     const record: ChallanRecord = {
       challanId: generateChallanId(),
       vehicleId,
       vehicleType,
-      plateNumber: (plateText || "").trim(),
-      violations,
+      plateNumber: owner ? owner.vehicle.plate : (plateText || "").trim(),
+      ownerName: owner?.vehicle.ownerName,
+      ownerPhone: owner?.vehicle.phone || undefined,
+      vehicleModel: owner?.vehicle.vehicleModel,
+      vehicleLabel: owner?.vehicle.vehicleLabel,
+      registryMatch: owner?.matchType,
+      violations: lineItems.map((l) => l.violation), // stored under the standard names
       totalFine: total,
       lineItems,
       status: "issued",
@@ -558,7 +622,7 @@ app.post("/api/challans", async (req: express.Request, res: express.Response) =>
 
     insertChallan(record);
 
-    return res.status(201).json({ success: true, challan: record });
+    return res.status(201).json({ success: true, challan: publicChallan(record) });
   } catch (error: any) {
     console.error("[Challan Engine] Error issuing challan:", error.message || error);
     return res.status(500).json({
@@ -571,7 +635,7 @@ app.post("/api/challans", async (req: express.Request, res: express.Response) =>
 // API Endpoint: list all saved challans, most recent first
 app.get("/api/challans", (_req: express.Request, res: express.Response) => {
   try {
-    return res.json({ success: true, challans: listChallans() });
+    return res.json({ success: true, challans: listChallans().map(publicChallan) });
   } catch (error: any) {
     console.error("[Challan Engine] Error listing challans:", error.message || error);
     return res.status(500).json({ success: false, error: "Failed to load challan records." });
@@ -582,7 +646,7 @@ app.get("/api/challans", (_req: express.Request, res: express.Response) => {
 app.get("/api/challans/:id", (req: express.Request, res: express.Response) => {
   const record = getChallanById(req.params.id);
   if (!record) return res.status(404).json({ success: false, error: "Challan not found." });
-  return res.json({ success: true, challan: record });
+  return res.json({ success: true, challan: publicChallan(record) });
 });
 
 // API Endpoint: edit a saved challan (correct a misread plate, adjust
@@ -596,7 +660,21 @@ app.put("/api/challans/:id", (req: express.Request, res: express.Response) => {
     const body = req.body as ChallanUpdateRequest;
     const updates: Parameters<typeof updateChallan>[1] = {};
 
-    if (typeof body.plateNumber === "string") updates.plateNumber = body.plateNumber.trim();
+    if (typeof body.plateNumber === "string") {
+      const typed = body.plateNumber.trim();
+      const owner = matchPlate([typed], listVehicles(), existing.vehicleType === "car" ? "car" : "motorcycle");
+      updates.plateNumber = owner ? owner.vehicle.plate : typed;
+      // A corrected plate re-reads the registry: owner details follow the plate.
+      updates.owner = owner
+        ? {
+            ownerName: owner.vehicle.ownerName,
+            ownerPhone: owner.vehicle.phone,
+            vehicleModel: owner.vehicle.vehicleModel,
+            vehicleLabel: owner.vehicle.vehicleLabel,
+            registryMatch: owner.matchType,
+          }
+        : null;
+    }
     if (body.status) updates.status = body.status;
 
     if (Array.isArray(body.violations)) {
@@ -607,13 +685,13 @@ app.put("/api/challans/:id", (req: express.Request, res: express.Response) => {
           error: "No billable violations in the updated list; a challan needs at least one.",
         });
       }
-      updates.violations = body.violations;
+      updates.violations = lineItems.map((l) => l.violation);
       updates.lineItems = lineItems;
       updates.totalFine = total;
     }
 
     const updated = updateChallan(req.params.id, updates);
-    return res.json({ success: true, challan: updated });
+    return res.json({ success: true, challan: updated ? publicChallan(updated) : updated });
   } catch (error: any) {
     console.error("[Challan Engine] Error updating challan:", error.message || error);
     return res.status(500).json({ success: false, error: "Failed to update challan." });
@@ -672,4 +750,30 @@ async function setupServer() {
   });
 }
 
+// Load data/vehicles.csv into the registry table (the CSV is the source of truth at every start).
+function initRegistry() {
+  try {
+    const loaded = loadRegistryCsv();
+    if (!loaded) {
+      console.warn(`[Registry] ${registryCsvPath()} not found; keeping the ${listVehicles().length} vehicle(s) already stored.`);
+      return;
+    }
+    for (const s of loaded.skipped) {
+      console.warn(`[Registry] Skipped line ${s.line} (${s.owner || "no name"}): ${s.reason}`);
+    }
+    if (loaded.vehicles.length === 0) {
+      console.warn("[Registry] The CSV contains no valid vehicles; registry left unchanged.");
+      return;
+    }
+    replaceVehicles(loaded.vehicles);
+    console.log(
+      `[Registry] Loaded ${loaded.vehicles.length} vehicle(s) from ${loaded.file}` +
+        (loaded.skipped.length ? ` (${loaded.skipped.length} row(s) skipped)` : "")
+    );
+  } catch (err: any) {
+    console.error("[Registry] Failed to load the vehicle registry:", err?.message || err);
+  }
+}
+
+initRegistry();
 setupServer();
